@@ -1,0 +1,39 @@
+variables:
+    DOCKER_REGIS_URL: "docker.dm-ai.cn" #docker仓库地址
+    PROJECT_NAME: devops #项目代号，也是k8s的namespace的名字
+    SERVER_NAME: get-apollo-to-file #服务名
+    IMAGE_TAG_NAME: "${DOCKER_REGIS_URL}/${PROJECT_NAME}/${SERVER_NAME}:${CI_COMMIT_SHA}"  #使用代码的commitid作为image的tag
+
+stages:
+  - build
+  - make_and_push_image
+    
+job_build:
+  image: docker.dm-ai.cn/public/golang:1.15-alpine
+  stage: build
+  script:
+    - export GOPROXY=https://mirrors.aliyun.com/goproxy/
+    - go build -o build/${SERVER_NAME} -v ./
+  artifacts:
+    expire_in: 3 mos #制品包在gitlab上的保存时间（每小时定时删除过期制品），如果不设置，将永久保存。
+    paths:
+      - build/
+  only:
+    - dev
+  tags:
+    - k8s-runner
+    
+job_make_and_push_image:
+  image: 
+    name: docker.dm-ai.cn/public/kaniko-executor:v1.6.0-debug
+    entrypoint: [""]
+  stage: make_and_push_image
+  script:
+    - cp -r src/build .
+    - echo "{\"auths\":{\"$DOCKER_REGISTRY_URL\":{\"username\":\"$DOCKER_REGISTRY_USERNAME\",\"password\":\"$DOCKER_REGISTRY_PASSWORD\"}}}" > /kaniko/.docker/config.json
+    - /kaniko/executor --context $CI_PROJECT_DIR --dockerfile $CI_PROJECT_DIR/service-run.Dockerfile --destination $IMAGE_TAG_NAME #使用kaniko代替dind/sokcet模式，打镜像和上传
+    - echo "docker image is:" && echo $IMAGE_TAG_NAME
+  only:
+    - dev
+  tags:
+    - k8s-runner
